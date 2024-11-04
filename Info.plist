@@ -1,0 +1,9 @@
+//
+//  Info.plist
+//  Imessage Analysis
+//
+//  Created by Landon on 11/3/24.
+//
+
+<key>NSContactsUsageDescription</key>
+<string>We need access to your contacts in order to properly label your messages.</string>
