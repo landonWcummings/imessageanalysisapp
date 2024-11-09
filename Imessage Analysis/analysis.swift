@@ -3,8 +3,6 @@ import Charts
 import Foundation
 
 // MARK: - Data Models
-
-
 struct Message: Identifiable {
     let id = UUID()
     let readableTime: Date
@@ -61,8 +59,6 @@ struct PersonActivityDataPoint: Identifiable {
 }
 
 // MARK: - MessagesAnalysisView
-
-
 struct MessagesAnalysisView: View {
     @State private var messages: [Message] = []
     @State private var activityData: [ActivityDataPoint] = []
@@ -80,31 +76,14 @@ struct MessagesAnalysisView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 30) {
-                // Lifetime Activity Chart
                 lifetimeActivityChart
-               
-                // Sent Messages with Average Line Chart
                 sentMessagesAverageChart
-               
-                // 24-Hour Analysis Charts
                 timeOfDayActivityCharts
-               
-                // Group Chat Participation Chart
                 groupChatParticipationChart
-               
-                // Top Group Chats Chart
                 topGroupChatsChart
-               
-                // Top Contacts by Direct Messages Chart
                 topContactsChart
-               
-                // Top Contacts by Total Interactions Chart
                 topContactsTotalInteractionsChart
-               
-                // Specific Group Chat Analysis Chart
                 specificGroupChatPieChart
-               
-                // Specific Person Activity Chart
                 specificPersonActivityChart
             }
             .padding()
@@ -175,7 +154,6 @@ struct MessagesAnalysisView: View {
             Text("Message Activity by Time of Day")
                 .font(.headline)
            
-            // Sent and Received Time Chart
             Chart {
                 ForEach(timeActivityData) { dataPoint in
                     BarMark(
@@ -189,20 +167,6 @@ struct MessagesAnalysisView: View {
                         y: .value("Received", dataPoint.received)
                     )
                     .foregroundStyle(Color.orange)
-                }
-            }
-            .chartXAxisLabel("Time of Day")
-            .chartYAxisLabel("Number of Messages")
-            .frame(height: 300)
-           
-            // Combined Messages Time Chart
-            Chart {
-                ForEach(timeActivityData) { dataPoint in
-                    BarMark(
-                        x: .value("Time Segment", dataPoint.timeSegment),
-                        y: .value("Total", dataPoint.total)
-                    )
-                    .foregroundStyle(Color.green)
                 }
             }
             .chartXAxisLabel("Time of Day")
@@ -222,10 +186,17 @@ struct MessagesAnalysisView: View {
                         y: .value("Group Chat", dataPoint.groupChatName)
                     )
                     .foregroundStyle(Color.blue)
+                    .annotation(position: .trailing) {
+                        Text("\(Int(dataPoint.participationRate * 100))%")
+                            .font(.caption)
+                            .foregroundColor(.gray)
+                    }
                 }
             }
             .chartXAxisLabel("Participation Rate")
-            .chartYAxis(.hidden)
+            .chartYAxis {
+                AxisMarks(preset: .aligned, position: .leading)
+            }
             .frame(height: 600)
         }
     }
@@ -241,10 +212,17 @@ struct MessagesAnalysisView: View {
                         y: .value("Group Chat", name)
                     )
                     .foregroundStyle(Color.blue)
+                    .annotation(position: .trailing) {
+                        Text(name)
+                            .font(.caption)
+                            .foregroundColor(.gray)
+                    }
                 }
             }
             .chartXAxisLabel("Number of Messages")
-            .chartYAxis(.hidden)
+            .chartYAxis {
+                AxisMarks(preset: .aligned, position: .leading)
+            }
             .frame(height: 600)
         }
     }
@@ -260,10 +238,17 @@ struct MessagesAnalysisView: View {
                         y: .value("Contact", contact)
                     )
                     .foregroundStyle(Color.blue)
+                    .annotation(position: .trailing) {
+                        Text(contact)
+                            .font(.caption)
+                            .foregroundColor(.gray)
+                    }
                 }
             }
             .chartXAxisLabel("Total Messages")
-            .chartYAxis(.hidden)
+            .chartYAxis {
+                AxisMarks(preset: .aligned, position: .leading)
+            }
             .frame(height: 600)
         }
     }
@@ -279,10 +264,17 @@ struct MessagesAnalysisView: View {
                         y: .value("Contact", dataPoint.contact)
                     )
                     .foregroundStyle(Color.blue)
+                    .annotation(position: .trailing) {
+                        Text(dataPoint.contact)
+                            .font(.caption)
+                            .foregroundColor(.gray)
+                    }
                 }
             }
             .chartXAxisLabel("Total Messages")
-            .chartYAxis(.hidden)
+            .chartYAxis {
+                AxisMarks(preset: .aligned, position: .leading)
+            }
             .frame(height: 600)
         }
     }
@@ -291,18 +283,28 @@ struct MessagesAnalysisView: View {
         VStack(alignment: .leading) {
             Text("Message Distribution by Sender in Group Chat")
                 .font(.headline)
-            Chart {
-                ForEach(specificGCData) { dataPoint in
-                    SectorMark(
-                        angle: .value("Messages", dataPoint.messageCount),
-                        innerRadius: .ratio(0.5),
-                        angularInset: 1
-                    )
-                    .foregroundStyle(by: .value("Sender", dataPoint.sender))
+            if specificGCData.isEmpty {
+                Text("No data available for the specified group chat.")
+                    .foregroundColor(.red)
+            } else {
+                Chart {
+                    ForEach(specificGCData) { dataPoint in
+                        SectorMark(
+                            angle: .value("Messages", dataPoint.messageCount),
+                            innerRadius: .ratio(0.5),
+                            angularInset: 1
+                        )
+                        .foregroundStyle(by: .value("Sender", dataPoint.sender))
+                        .annotation(position: .overlay) {
+                            Text("\(dataPoint.sender): \(dataPoint.messageCount)")
+                                .font(.caption2)
+                                .foregroundColor(.white)
+                        }
+                    }
                 }
+                .chartLegend(position: .bottom)
+                .frame(height: 400)
             }
-            .chartLegend(position: .bottom)
-            .frame(height: 400)
         }
     }
    
@@ -310,32 +312,35 @@ struct MessagesAnalysisView: View {
         VStack(alignment: .leading) {
             Text("Message Activity with Specific Person Over Time")
                 .font(.headline)
-            Chart {
-                ForEach(specificPersonData) { dataPoint in
-                    LineMark(
-                        x: .value("Date", dataPoint.intervalStart),
-                        y: .value("DM Messages", dataPoint.dmMessages)
-                    )
-                    .foregroundStyle(Color.blue)
-                   
-                    LineMark(
-                        x: .value("Date", dataPoint.intervalStart),
-                        y: .value("Total Interactions", dataPoint.totalInteractions)
-                    )
-                    .foregroundStyle(Color.green)
+            if specificPersonData.isEmpty {
+                Text("No data available for the specified contact.")
+                    .foregroundColor(.red)
+            } else {
+                Chart {
+                    ForEach(specificPersonData) { dataPoint in
+                        LineMark(
+                            x: .value("Date", dataPoint.intervalStart),
+                            y: .value("DM Messages", dataPoint.dmMessages)
+                        )
+                        .foregroundStyle(Color.blue)
+                       
+                        LineMark(
+                            x: .value("Date", dataPoint.intervalStart),
+                            y: .value("Total Interactions", dataPoint.totalInteractions)
+                        )
+                        .foregroundStyle(Color.green)
+                    }
                 }
+                .chartXAxisLabel("Date")
+                .chartYAxisLabel("Number of Messages")
+                .frame(height: 300)
             }
-            .chartXAxisLabel("Date")
-            .chartYAxisLabel("Number of Messages")
-            .frame(height: 300)
-
         }
     }
    
     // MARK: - Data Loading and Processing
    
     func loadData() {
-        // Get the path to the CSV file
         let fileManager = FileManager.default
         guard let documentsDirectory = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first else {
             print("Could not access the documents directory.")
@@ -344,12 +349,25 @@ struct MessagesAnalysisView: View {
         let fileURL = documentsDirectory.appendingPathComponent("MyAppData/processed_messages.csv")
         print("location: \(fileURL)")
        
-        // Read the CSV file
         do {
             let csvString = try String(contentsOf: fileURL, encoding: .utf8)
-            
+           
             self.messages = parseCSV(csvString: csvString)
-            print("data loaded succesfully")
+            print("data loaded successfully")
+           
+            // Print available group chat names and contacts
+            let groupChatNames = Set(messages.compactMap { $0.groupChatName })
+            print("Available group chat names:")
+            for name in groupChatNames {
+                print(name)
+            }
+           
+            let contactNames = Set(messages.map { $0.sender }).union(messages.map { $0.to })
+            print("Available contact names:")
+            for name in contactNames {
+                print(name)
+            }
+           
             processData()
         } catch {
             print("Error reading CSV file: \(error)")
@@ -364,31 +382,17 @@ struct MessagesAnalysisView: View {
         let individualMessages = messages.filter { !$0.groupChat }
         let groupingsize = 10 // days
        
-        // Lifetime Activity Analysis
         lifetimeActivityAnalysis(sentMes: sentMes, recMes: recMes, groupingsize: groupingsize)
-       
-        // 24-Hour Analysis
         timeActivityAnalysis(sentMes: sentMes, recMes: recMes)
-       
-        // Group Chat Participation Analysis
         groupChatParticipationAnalysis(groupChats: groupChats)
-       
-        // Top Group Chats
         topGroupChatsAnalysis(groupChats: groupChats)
-       
-        // Direct Messages Analysis
         directMessagesAnalysis(individualMessages: individualMessages)
-       
-        // Total Interactions Analysis
         totalInteractionsAnalysis(individualMessages: individualMessages, groupChats: groupChats)
-       
-        // Specific Group Chat Analysis
         specificGroupChatAnalysis(groupChats: groupChats)
-       
-        // Specific Person Analysis
         specificPersonAnalysis(individualMessages: individualMessages, groupChats: groupChats)
     }
    
+    // MARK: - Analysis Functions
     // MARK: - Analysis Functions
    
     func lifetimeActivityAnalysis(sentMes: [Message], recMes: [Message], groupingsize: Int) {
@@ -519,7 +523,7 @@ struct MessagesAnalysisView: View {
     }
    
     func specificGroupChatAnalysis(groupChats: [Message]) {
-        let targetGC = "Your Group Chat Name Here" // Replace with your target group chat name
+        let targetGC = "XC Juniors" // Replace with your target group chat name
         let groupChatMessages = groupChats.filter { $0.groupChatName == targetGC }
         let senderCounts = Dictionary(grouping: groupChatMessages.map { $0.sender }, by: { $0 }).mapValues { $0.count }
        
@@ -532,7 +536,7 @@ struct MessagesAnalysisView: View {
     }
    
     func specificPersonAnalysis(individualMessages: [Message], groupChats: [Message]) {
-        let target = "Your Contact Name Here" // Replace with your target contact name
+        let target = "rumana" // Replace with your target contact name
         let groupingsize = 10 // days
         let calendar = Calendar.current
         guard let minDate = messages.min(by: { $0.readableTime < $1.readableTime })?.readableTime else {
@@ -594,28 +598,19 @@ struct MessagesAnalysisView: View {
             tempPersonActivityData.append(dataPoint)
         }
         self.specificPersonData = tempPersonActivityData.sorted(by: { $0.intervalStart < $1.intervalStart })
-
-
     }
-   
     // MARK: - Helper Functions
    
     func parseCSV(csvString: String) -> [Message] {
         var messages: [Message] = []
         let lines = csvString.components(separatedBy: .newlines)
+       
         guard let headerLine = lines.first else {
             print("CSV is empty")
             return messages
         }
         let headers = headerLine.components(separatedBy: ",")
-            
-        // Print all columns
-        print("Columns in CSV:")
-        for header in headers {
-            print(header)
-        }
-
-        // Find the index of each column
+       
         guard let readableTimeIndex = headers.firstIndex(of: "Readable Time"),
               let sentByMeIndex = headers.firstIndex(of: "Sent by Me"),
               let groupChatIndex = headers.firstIndex(of: "Group Chat"),
@@ -623,50 +618,50 @@ struct MessagesAnalysisView: View {
               let senderIndex = headers.firstIndex(of: "Sender"),
               let toIndex = headers.firstIndex(of: "To") else {
             print("CSV headers are missing required columns.")
-            
             return messages
         }
        
         let dateFormatter = DateFormatter()
-        dateFormatter.dateFormat = "yyyy-MM-dd HH:mm:ss" // Adjust the date format according to your CSV data
+        dateFormatter.dateFormat = "yyyy-MM-dd HH:mm:ss" // Adjust to your date format
        
         for line in lines.dropFirst() {
             let columns = line.components(separatedBy: ",")
             if columns.count != headers.count {
-                continue // Skip malformed lines
+                print("Skipping malformed line: \(line)")
+                continue
             }
            
             let readableTimeString = columns[readableTimeIndex]
             let sentByMeString = columns[sentByMeIndex]
             let groupChatString = columns[groupChatIndex]
-            let groupChatNameString = columns[groupChatNameIndex]
-            let senderString = columns[senderIndex]
-            let toString = columns[toIndex]
+            let groupChatNameString = columns[groupChatNameIndex].isEmpty ? nil : columns[groupChatNameIndex]
+            let senderString = columns[senderIndex].isEmpty ? "Unknown" : columns[senderIndex]
+            let toString = columns[toIndex].isEmpty ? "Unknown" : columns[toIndex]
            
             guard let readableTime = dateFormatter.date(from: readableTimeString) else {
-                continue // Skip lines with invalid date
+                print("Skipping line with invalid date: \(line)")
+                continue
             }
            
             let sentByMe = (sentByMeString == "1")
             let groupChat = (groupChatString == "1")
-            let groupChatName = groupChatNameString.isEmpty ? nil : groupChatNameString
            
             let message = Message(
                 readableTime: readableTime,
                 sentByMe: sentByMe,
                 groupChat: groupChat,
-                groupChatName: groupChatName,
+                groupChatName: groupChatNameString,
                 sender: senderString,
                 to: toString
             )
             messages.append(message)
         }
+       
         return messages
     }
 }
 
 // MARK: - Extensions
-
 extension Date {
     func rounded(to interval: TimeInterval) -> Date {
         let timeInterval = self.timeIntervalSinceReferenceDate
@@ -674,3 +669,8 @@ extension Date {
         return Date(timeIntervalSinceReferenceDate: roundedInterval)
     }
 }
+
+
+  
+   
+

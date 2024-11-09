@@ -12,7 +12,7 @@ struct ContentView: View {
         VStack {
             Button(action: {
                 print("Button tapped")
-                openFilePicker()
+                findchatdb()
                 createFolder()
                 if let dbURL = selectedFileURL {
                     exportChatData(to: dbURL) // Call function to export chat data
@@ -32,11 +32,12 @@ struct ContentView: View {
             }
             if showAnalysisView {
                 MessagesAnalysisView()
-                    .transition(.slide) // Optional: Add a transition animation
+                    .transition(.slide)
             }
 
         }
         .padding()
+        .frame(minWidth: 1100, minHeight: 900)
     }
     func createFolder() {
         // Get the URL to the Documents directory
@@ -55,22 +56,17 @@ struct ContentView: View {
         }
     }
 
-    func openFilePicker() {
-        let panel = NSOpenPanel()
-        panel.allowedFileTypes = ["db"]  // Accept only .db files
-        panel.allowsMultipleSelection = false
-        panel.canChooseDirectories = false
-        panel.title = "Select chat.db File" // Optional: Set panel title
-        panel.directoryURL = FileManager.default.homeDirectoryForCurrentUser
-                            .appendingPathComponent("Library/Messages") // Default directory for iMessage database
-
-        if panel.runModal() == .OK {
-            if let url = panel.url, url.lastPathComponent == "chat.db" { // Ensure it’s the correct file
-                selectedFileURL = url
-            } else {
-                print("Selected file is not chat.db") // Handle incorrect file selection
-            }
+    func findchatdb() {
+        let homeDirectory = FileManager.default.homeDirectoryForCurrentUser
+        let chatdbPath = homeDirectory.appendingPathComponent("Library/Messages/chat.db")
+        selectedFileURL = chatdbPath
+        if FileManager.default.fileExists(atPath: chatdbPath.path) {
+            print("Found chat.db at \(chatdbPath.path)")
+        } else {
+            print("chat.db not found at \(chatdbPath.path)")
         }
+
+        
     }
     func updateMessageSendersWithContactNames() -> Result<String, Error> {
         do {
@@ -111,49 +107,68 @@ struct ContentView: View {
             // Read messages file
             let messagesData = try String(contentsOf: messagesPath, encoding: .utf8)
             let messageRows = messagesData.components(separatedBy: .newlines)
-            var output = messageRows[0].replacingOccurrences(of: "Contact Identifier", with: "To") + "\n" // Change "old_header_name" to the actual header of the eighth column
 
-            // Prepare output with header
-            
-            
+            // Get the header row and process it
+            var headerColumns = messageRows[0].components(separatedBy: ",")
+            var validHeaderIndices = [Int]() // Store indices of valid headers
+            var output = ""
+
+            for (index, header) in headerColumns.enumerated() {
+                let trimmedHeader = header.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmedHeader.isEmpty { // Check for empty header
+                    validHeaderIndices.append(index)
+                    output += "\(header),"
+                }
+            }
+            output = String(output.dropLast()) + "\n" // Remove last comma and add newline
+
             // Process each message row
             for row in messageRows.dropFirst() where !row.isEmpty {
                 var columns = row.components(separatedBy: ",")
-                guard columns.count >= 9 else { continue }
                 
+                // Create a new array to hold valid columns
+                var validColumns = [String]()
+                
+                // Filter columns based on valid header indices
+                for index in validHeaderIndices {
+                    if index < columns.count {
+                        validColumns.append(columns[index].trimmingCharacters(in: CharacterSet(charactersIn: "\"")))
+                    }
+                }
+                
+                guard validColumns.count >= 9 else { continue } // Ensure there are enough columns
+
                 // Get sender column (third column) and clean it
-                var senderNumber = columns[2].trimmingCharacters(in: CharacterSet(charactersIn: "\""))
+                var senderNumber = validColumns[2]
                 senderNumber = senderNumber.replacingOccurrences(of: "\\D", with: "", options: .regularExpression)
                 if senderNumber.count == 10 {
                     senderNumber = "1" + senderNumber
                 }
-                
-                var contactidNumber = columns[8].trimmingCharacters(in: CharacterSet(charactersIn: "\""))
+
+                var contactidNumber = validColumns[8]
                 contactidNumber = contactidNumber.replacingOccurrences(of: "\\D", with: "", options: .regularExpression)
                 if contactidNumber.count == 10 {
                     contactidNumber = "1" + senderNumber
                 }
 
-
                 // Replace sender with contact name if exists
                 if let contactName = contacts[senderNumber] {
-                    columns[2] = "\"\(contactName)\""
+                    validColumns[2] = "\"\(contactName)\""
                 }
-                
+
                 // Replace sender with contact name if exists
                 if let contactName = contacts[contactidNumber] {
-                    columns[8] = "\"\(contactName)\""
+                    validColumns[8] = "\"\(contactName)\""
                 }
-                
-                if columns[5].trimmingCharacters(in: .whitespacesAndNewlines) == "0" {
-                    columns[8] = "\"\"" // Set to empty string if Group Chat is 0
-                }
-                
-                
 
-                // Add processed row to output
-                output += columns.joined(separator: ",") + "\n"
+                if validColumns[5].trimmingCharacters(in: .whitespacesAndNewlines) == "1" {
+                    validColumns[8] = "\"\"" // Set to empty string if Group Chat is 0
+                }
+
+                // Add processed valid row to output
+                output += validColumns.joined(separator: ",") + "\n"
             }
+
             
             // Write processed data to new file
             try output.write(to: outputPath, atomically: true, encoding: .utf8)
@@ -306,7 +321,7 @@ struct ContentView: View {
 
         var statement: OpaquePointer?
         if sqlite3_prepare_v2(db, query, -1, &statement, nil) == SQLITE_OK {
-            var csvString = "Timestamp,Readable Time,Sender,Sender ID,Message,Group Chat,Group Chat Name,Sent by Me,Contact Identifier\n"
+            var csvString = "Timestamp,Readable Time,Sender,Sender ID,Message,Group Chat,Group Chat Name,Sent by Me,To\n"
 
             while sqlite3_step(statement) == SQLITE_ROW {
                 let timestamp = sqlite3_column_double(statement, 0)
@@ -315,13 +330,18 @@ struct ContentView: View {
                 let readableTime = sqlite3_column_text(statement, 1).flatMap { String(cString: $0) } ?? "N/A"
                 let sender = sqlite3_column_text(statement, 2).flatMap { String(cString: $0) } ?? "Unknown"
                 let senderId = sqlite3_column_int64(statement, 3)
+                
+                // Escape quotes in message text
                 let messageText = sqlite3_column_text(statement, 4).flatMap { String(cString: $0) } ?? ""
+                let escapedMessageText = messageText.replacingOccurrences(of: "\"", with: "\"\"")
+                
                 let isGroupChat = sqlite3_column_int(statement, 5)
                 let groupChatName = sqlite3_column_text(statement, 6).flatMap { String(cString: $0) } ?? "N/A"
                 let isFromMe = sqlite3_column_int(statement, 7)
                 let contactIdentifier = sqlite3_column_text(statement, 8).flatMap { String(cString: $0) } ?? ""
 
-                csvString += "\(timestamp),\"\(readableTime)\",\"\(sender)\",\(senderId),\"\(messageText)\",\(isGroupChat),\"\(groupChatName)\",\(isFromMe),\"\(contactIdentifier)\"\n"
+                // Enclose the messageText in quotes
+                csvString += "\(timestamp),\"\(readableTime)\",\"\(sender)\",\(senderId),\"\(escapedMessageText)\",\(isGroupChat),\"\(groupChatName)\",\(isFromMe),\"\(contactIdentifier)\"\n"
             }
 
             // Write CSV string to file
@@ -347,5 +367,6 @@ struct Imessage_AnalysisApp: App {
         WindowGroup {
             ContentView() // This will load the MessagesAnalysisView
         }
+        .windowStyle(DefaultWindowStyle())
     }
 }
