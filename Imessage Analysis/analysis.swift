@@ -23,6 +23,13 @@ struct ActivityDataPoint: Identifiable {
     }
 }
 
+struct PersonLineDataPoint: Identifiable {
+    let id = UUID()
+    let intervalStart: Date
+    let messageType: String // "DM Messages" or "Total Interactions"
+    let count: Int
+}
+
 struct TimeActivityDataPoint: Identifiable {
     let id = UUID()
     let timeSegment: String
@@ -32,6 +39,14 @@ struct TimeActivityDataPoint: Identifiable {
         return sent + received
     }
 }
+
+struct ActivityLineDataPoint: Identifiable {
+    let id = UUID()
+    let intervalStart: Date
+    let messageType: String // "Sent", "Received", or "Total"
+    let count: Int
+}
+
 
 struct GroupChatParticipation: Identifiable {
     let id = UUID()
@@ -49,6 +64,7 @@ struct SenderMessageCount: Identifiable {
     let id = UUID()
     let sender: String
     let messageCount: Int
+    let percentage: Double
 }
 
 struct PersonActivityDataPoint: Identifiable {
@@ -62,6 +78,7 @@ struct PersonActivityDataPoint: Identifiable {
 struct MessagesAnalysisView: View {
     @State private var messages: [Message] = []
     @State private var activityData: [ActivityDataPoint] = []
+    @State private var activityLineData: [ActivityLineDataPoint] = []
     @State private var sentCounts: [Date: Int] = [:]
     @State private var recCounts: [Date: Int] = [:]
     @State private var averageSent: Double = 0.0
@@ -71,9 +88,13 @@ struct MessagesAnalysisView: View {
     @State private var contactCounts: [String: Int] = [:]
     @State private var totalInteractionsData: [ContactInteraction] = []
     @State private var specificGCData: [SenderMessageCount] = []
+    @State private var personLineData: [PersonLineDataPoint] = []
     @State private var specificPersonData: [PersonActivityDataPoint] = []
+    @State var targetGC = ""
+    @State var targetContact = ""
    
     var body: some View {
+        
         ScrollView {
             VStack(spacing: 30) {
                 lifetimeActivityChart
@@ -98,38 +119,39 @@ struct MessagesAnalysisView: View {
    
     var lifetimeActivityChart: some View {
         VStack(alignment: .leading) {
-            Text("Lifetime Activity: Messages Sent, Received, and Total")
+            Text("Lifetime Activity: Messages Sent, Received, and Total (over 10 day intervals)")
                 .font(.headline)
+            
             Chart {
-                ForEach(activityData) { dataPoint in
+                ForEach(activityLineData) { dataPoint in
                     LineMark(
                         x: .value("Date", dataPoint.intervalStart),
-                        y: .value("Sent", dataPoint.sent)
+                        y: .value("Messages", dataPoint.count)
                     )
-                    .foregroundStyle(Color.blue)
-                   
-                    LineMark(
-                        x: .value("Date", dataPoint.intervalStart),
-                        y: .value("Received", dataPoint.received)
-                    )
-                    .foregroundStyle(Color.orange)
-                   
-                    LineMark(
-                        x: .value("Date", dataPoint.intervalStart),
-                        y: .value("Total", dataPoint.total)
-                    )
-                    .foregroundStyle(Color.green)
+                    .foregroundStyle(by: .value("Message Type", dataPoint.messageType))
+                    .lineStyle(StrokeStyle(lineWidth: 2))
                 }
             }
+            .chartForegroundStyleScale([
+                "Sent": Color.blue,
+                "Received": Color.orange,
+                "Total": Color.green
+            ])
+            .chartLegend(position: .bottom)
             .chartXAxisLabel("Date")
             .chartYAxisLabel("Number of Messages")
             .frame(height: 300)
         }
     }
+
+
+
+
+
    
     var sentMessagesAverageChart: some View {
         VStack(alignment: .leading) {
-            Text("Total Messages Sent in Intervals with Average")
+            Text("Total Messages Sent in 10-Day Intervals and Average")
                 .font(.headline)
             Chart {
                 ForEach(sentCounts.sorted(by: { $0.key < $1.key }), id: \.key) { date, count in
@@ -151,9 +173,9 @@ struct MessagesAnalysisView: View {
    
     var timeOfDayActivityCharts: some View {
         VStack(alignment: .leading, spacing: 20) {
-            Text("Message Activity by Time of Day")
+            Text("Message Activity by Time of Day (20 minute segments)")
                 .font(.headline)
-           
+
             Chart {
                 ForEach(timeActivityData) { dataPoint in
                     BarMark(
@@ -161,7 +183,7 @@ struct MessagesAnalysisView: View {
                         y: .value("Sent", dataPoint.sent)
                     )
                     .foregroundStyle(Color.blue)
-                   
+                    
                     BarMark(
                         x: .value("Time Segment", dataPoint.timeSegment),
                         y: .value("Received", dataPoint.received)
@@ -169,11 +191,17 @@ struct MessagesAnalysisView: View {
                     .foregroundStyle(Color.orange)
                 }
             }
+            .chartXAxis {
+                AxisMarks(preset: .aligned, position: .bottom) { _ in
+                    AxisValueLabel(orientation: .vertical) // Rotate labels to be vertical
+                }
+            }
             .chartXAxisLabel("Time of Day")
             .chartYAxisLabel("Number of Messages")
             .frame(height: 300)
         }
     }
+
    
     var groupChatParticipationChart: some View {
         VStack(alignment: .leading) {
@@ -212,10 +240,13 @@ struct MessagesAnalysisView: View {
                         y: .value("Group Chat", name)
                     )
                     .foregroundStyle(Color.blue)
+                    // Display group name on the left and exact message count on the right of each bar
                     .annotation(position: .trailing) {
-                        Text(name)
-                            .font(.caption)
-                            .foregroundColor(.gray)
+                        HStack {
+                            Text("\(count)") // Right-side annotation (Message Count)
+                                .font(.caption)
+                                .foregroundColor(.gray)
+                        }
                     }
                 }
             }
@@ -226,6 +257,7 @@ struct MessagesAnalysisView: View {
             .frame(height: 600)
         }
     }
+
    
     var topContactsChart: some View {
         VStack(alignment: .leading) {
@@ -239,7 +271,7 @@ struct MessagesAnalysisView: View {
                     )
                     .foregroundStyle(Color.blue)
                     .annotation(position: .trailing) {
-                        Text(contact)
+                        Text("\(count)")
                             .font(.caption)
                             .foregroundColor(.gray)
                     }
@@ -265,7 +297,7 @@ struct MessagesAnalysisView: View {
                     )
                     .foregroundStyle(Color.blue)
                     .annotation(position: .trailing) {
-                        Text(dataPoint.contact)
+                        Text("\(dataPoint.totalMessages)")
                             .font(.caption)
                             .foregroundColor(.gray)
                     }
@@ -281,8 +313,13 @@ struct MessagesAnalysisView: View {
    
     var specificGroupChatPieChart: some View {
         VStack(alignment: .leading) {
-            Text("Message Distribution by Sender in Group Chat")
-                .font(.headline)
+            HStack {
+                Text("Message Distribution by Sender in Group Chat:")
+                    .foregroundColor(.black)
+                Text(targetGC)
+                    .foregroundColor(.red)
+            }
+            
             if specificGCData.isEmpty {
                 Text("No data available for the specified group chat.")
                     .foregroundColor(.red)
@@ -296,47 +333,59 @@ struct MessagesAnalysisView: View {
                         )
                         .foregroundStyle(by: .value("Sender", dataPoint.sender))
                         .annotation(position: .overlay) {
-                            Text("\(dataPoint.sender): \(dataPoint.messageCount)")
+                            Text("\(dataPoint.sender): \(dataPoint.messageCount) (\(String(format: "%.1f", dataPoint.percentage))%)")
                                 .font(.caption2)
-                                .foregroundColor(.white)
+                                .foregroundColor(.primary)
                         }
                     }
                 }
                 .chartLegend(position: .bottom)
-                .frame(height: 400)
+                .frame(height: 600)
             }
         }
     }
+
+
+
+
+
    
     var specificPersonActivityChart: some View {
         VStack(alignment: .leading) {
-            Text("Message Activity with Specific Person Over Time")
-                .font(.headline)
-            if specificPersonData.isEmpty {
+            HStack {
+                Text("Message Activity with ")
+                    .foregroundColor(.black)
+                Text(targetContact)
+                    .foregroundColor(.red)
+                Text(" Over Time")
+                    .foregroundColor(.black)
+            }
+            if personLineData.isEmpty {
                 Text("No data available for the specified contact.")
                     .foregroundColor(.red)
             } else {
                 Chart {
-                    ForEach(specificPersonData) { dataPoint in
+                    ForEach(personLineData) { dataPoint in
                         LineMark(
                             x: .value("Date", dataPoint.intervalStart),
-                            y: .value("DM Messages", dataPoint.dmMessages)
+                            y: .value("Messages", dataPoint.count)
                         )
-                        .foregroundStyle(Color.blue)
-                       
-                        LineMark(
-                            x: .value("Date", dataPoint.intervalStart),
-                            y: .value("Total Interactions", dataPoint.totalInteractions)
-                        )
-                        .foregroundStyle(Color.green)
+                        .foregroundStyle(by: .value("Message Type", dataPoint.messageType))
+                        .lineStyle(StrokeStyle(lineWidth: 2))
                     }
                 }
+                .chartForegroundStyleScale([
+                    "DM Messages": Color.blue,
+                    "Total Interactions": Color.green
+                ])
+                .chartLegend(position: .bottom)
                 .chartXAxisLabel("Date")
                 .chartYAxisLabel("Number of Messages")
                 .frame(height: 300)
             }
         }
     }
+
    
     // MARK: - Data Loading and Processing
    
@@ -346,7 +395,7 @@ struct MessagesAnalysisView: View {
             print("Could not access the documents directory.")
             return
         }
-        let fileURL = documentsDirectory.appendingPathComponent("MyAppData/processed_messages.csv")
+        let fileURL = documentsDirectory.appendingPathComponent("ImessageAnalysisData/processed_messages.csv")
         print("location: \(fileURL)")
        
         do {
@@ -357,17 +406,9 @@ struct MessagesAnalysisView: View {
            
             // Print available group chat names and contacts
             let groupChatNames = Set(messages.compactMap { $0.groupChatName })
-            print("Available group chat names:")
-            for name in groupChatNames {
-                print(name)
-            }
-           
+                       
             let contactNames = Set(messages.map { $0.sender }).union(messages.map { $0.to })
-            print("Available contact names:")
-            for name in contactNames {
-                print(name)
-            }
-           
+                       
             processData()
         } catch {
             print("Error reading CSV file: \(error)")
@@ -376,20 +417,29 @@ struct MessagesAnalysisView: View {
     }
    
     func processData() {
-        let sentMes = messages.filter { $0.sentByMe }
-        let recMes = messages.filter { !$0.sentByMe }
-        let groupChats = messages.filter { $0.groupChat }
-        let individualMessages = messages.filter { !$0.groupChat }
-        let groupingsize = 10 // days
-       
-        lifetimeActivityAnalysis(sentMes: sentMes, recMes: recMes, groupingsize: groupingsize)
-        timeActivityAnalysis(sentMes: sentMes, recMes: recMes)
-        groupChatParticipationAnalysis(groupChats: groupChats)
-        topGroupChatsAnalysis(groupChats: groupChats)
-        directMessagesAnalysis(individualMessages: individualMessages)
-        totalInteractionsAnalysis(individualMessages: individualMessages, groupChats: groupChats)
-        specificGroupChatAnalysis(groupChats: groupChats)
-        specificPersonAnalysis(individualMessages: individualMessages, groupChats: groupChats)
+        DispatchQueue.global().async {
+            targetGC = LoadingManager.shared.targetGC
+            targetContact = LoadingManager.shared.targetContact
+            
+            let sentMes = messages.filter { $0.sentByMe }
+            let recMes = messages.filter { !$0.sentByMe }
+            let groupChats = messages.filter { $0.groupChat }
+            let individualMessages = messages.filter { !$0.groupChat }
+            let groupingsize = 10 // days
+            
+            lifetimeActivityAnalysis(sentMes: sentMes, recMes: recMes, groupingsize: groupingsize)
+            timeActivityAnalysis(sentMes: sentMes, recMes: recMes)
+            groupChatParticipationAnalysis(groupChats: groupChats)
+            topGroupChatsAnalysis(groupChats: groupChats)
+            directMessagesAnalysis(individualMessages: individualMessages)
+            totalInteractionsAnalysis(individualMessages: individualMessages, groupChats: groupChats)
+            specificGroupChatAnalysis(groupChats: groupChats)
+            specificPersonAnalysis(individualMessages: individualMessages, groupChats: groupChats)
+            DispatchQueue.main.async {
+                
+                LoadingManager.shared.isLoading = false
+            }
+        }
     }
    
     // MARK: - Analysis Functions
@@ -397,49 +447,80 @@ struct MessagesAnalysisView: View {
    
     func lifetimeActivityAnalysis(sentMes: [Message], recMes: [Message], groupingsize: Int) {
         let calendar = Calendar.current
-        guard let minDate = messages.min(by: { $0.readableTime < $1.readableTime })?.readableTime else {
+        
+        // Find the earliest and latest dates in the data
+        guard let minDate = messages.min(by: { $0.readableTime < $1.readableTime })?.readableTime,
+              let maxDate = messages.max(by: { $0.readableTime < $1.readableTime })?.readableTime else {
             print("No messages to analyze.")
             return
         }
-       
-        let referenceDate = minDate
-       
-        func intervalLabel(for date: Date) -> Date {
-            let daysSinceReference = calendar.dateComponents([.day], from: referenceDate, to: date).day ?? 0
-            let intervalIndex = daysSinceReference / groupingsize
-            guard let intervalStartDate = calendar.date(byAdding: .day, value: intervalIndex * groupingsize, to: referenceDate) else {
-                return referenceDate
-            }
-            return intervalStartDate
+        
+        let referenceDate = calendar.startOfDay(for: minDate)
+        // Generate all intervals from minDate to maxDate
+        var allIntervalStarts: [Date] = []
+        var intervalStart = referenceDate
+        while intervalStart <= maxDate {
+            allIntervalStarts.append(intervalStart)
+            intervalStart = calendar.date(byAdding: .day, value: groupingsize, to: intervalStart) ?? intervalStart
         }
-       
-        // Sent Messages
+        // Count messages per interval
         for message in sentMes {
-            let intervalStart = intervalLabel(for: message.readableTime)
+            let intervalStart = intervalLabel(for: message.readableTime, referenceDate: referenceDate, groupingsize: groupingsize)
             sentCounts[intervalStart, default: 0] += 1
         }
-       
-        // Received Messages
         for message in recMes {
-            let intervalStart = intervalLabel(for: message.readableTime)
+            let intervalStart = intervalLabel(for: message.readableTime, referenceDate: referenceDate, groupingsize: groupingsize)
             recCounts[intervalStart, default: 0] += 1
         }
-       
-        // Prepare Activity Data
-        let allIntervalStarts = Set(sentCounts.keys).union(recCounts.keys).sorted()
+        // Ensure all intervals are represented in both sentCounts and recCounts
+        for interval in allIntervalStarts {
+            if sentCounts[interval] == nil {
+                sentCounts[interval] = 0
+            }
+            if recCounts[interval] == nil {
+                recCounts[interval] = 0
+            }
+        }
+        // Create ActivityDataPoints from aligned intervals
         var tempActivityData: [ActivityDataPoint] = []
-        for intervalStart in allIntervalStarts {
-            let sent = sentCounts[intervalStart] ?? 0
-            let received = recCounts[intervalStart] ?? 0
-            let dataPoint = ActivityDataPoint(intervalStart: intervalStart, sent: sent, received: received)
+        for interval in allIntervalStarts {
+            let sent = sentCounts[interval] ?? 0
+            let received = recCounts[interval] ?? 0
+            let dataPoint = ActivityDataPoint(intervalStart: interval, sent: sent, received: received)
             tempActivityData.append(dataPoint)
         }
         self.activityData = tempActivityData.sorted(by: { $0.intervalStart < $1.intervalStart })
-       
-        // Average Sent Messages
+        // Calculate average sent messages
         let totalSentMessages = sentCounts.values.reduce(0, +)
         self.averageSent = Double(totalSentMessages) / Double(sentCounts.count)
+        
+        // Transform activityData into activityLineData
+        var tempActivityLineData: [ActivityLineDataPoint] = []
+        for dataPoint in self.activityData {
+            tempActivityLineData.append(ActivityLineDataPoint(intervalStart: dataPoint.intervalStart, messageType: "Sent", count: dataPoint.sent))
+            tempActivityLineData.append(ActivityLineDataPoint(intervalStart: dataPoint.intervalStart, messageType: "Received", count: dataPoint.received))
+            tempActivityLineData.append(ActivityLineDataPoint(intervalStart: dataPoint.intervalStart, messageType: "Total", count: dataPoint.total))
+        }
+        self.activityLineData = tempActivityLineData
     }
+
+
+    // Helper function to align dates to intervals
+    private func intervalLabel(for date: Date, referenceDate: Date, groupingsize: Int) -> Date {
+        let calendar = Calendar.current
+        let daysSinceReference = calendar.dateComponents([.day], from: referenceDate, to: date).day ?? 0
+        let intervalIndex = daysSinceReference / groupingsize
+        return calendar.date(byAdding: .day, value: intervalIndex * groupingsize, to: referenceDate) ?? referenceDate
+    }
+
+
+
+
+
+
+
+
+
    
     func timeActivityAnalysis(sentMes: [Message], recMes: [Message]) {
         let timegroup = 20 // minutes
@@ -523,72 +604,74 @@ struct MessagesAnalysisView: View {
     }
    
     func specificGroupChatAnalysis(groupChats: [Message]) {
-        let targetGC = "XC Juniors" // Replace with your target group chat name
         let groupChatMessages = groupChats.filter { $0.groupChatName == targetGC }
+        let totalMessages = groupChatMessages.count
         let senderCounts = Dictionary(grouping: groupChatMessages.map { $0.sender }, by: { $0 }).mapValues { $0.count }
-       
+        
         var tempSpecificGCData: [SenderMessageCount] = []
         for (sender, count) in senderCounts {
-            let dataPoint = SenderMessageCount(sender: sender, messageCount: count)
+            let percentage = Double(count) / Double(totalMessages) * 100
+            let dataPoint = SenderMessageCount(sender: sender, messageCount: count, percentage: percentage)
             tempSpecificGCData.append(dataPoint)
         }
-        self.specificGCData = tempSpecificGCData
+        
+        self.specificGCData = tempSpecificGCData.sorted(by: { $0.messageCount > $1.messageCount })
     }
+
    
     func specificPersonAnalysis(individualMessages: [Message], groupChats: [Message]) {
-        let target = "rumana" // Replace with your target contact name
         let groupingsize = 10 // days
         let calendar = Calendar.current
-        guard let minDate = messages.min(by: { $0.readableTime < $1.readableTime })?.readableTime else {
+        guard let minDate = messages.min(by: { $0.readableTime < $1.readableTime })?.readableTime,
+              let maxDate = messages.max(by: { $0.readableTime < $1.readableTime })?.readableTime else {
+            print("No messages to analyze.")
             return
         }
-        let referenceDate = minDate
-       
+        let referenceDate = calendar.startOfDay(for: minDate)
         func intervalLabel(for date: Date) -> Date {
             let daysSinceReference = calendar.dateComponents([.day], from: referenceDate, to: date).day ?? 0
             let intervalIndex = daysSinceReference / groupingsize
-            guard let intervalStartDate = calendar.date(byAdding: .day, value: intervalIndex * groupingsize, to: referenceDate) else {
-                return referenceDate
-            }
-            return intervalStartDate
+            return calendar.date(byAdding: .day, value: intervalIndex * groupingsize, to: referenceDate) ?? referenceDate
         }
-       
-        // Direct Messages with Target
-        let dmMessages = individualMessages.filter { $0.to == target }
-       
-        // Group Chat Messages from Target
-        let groupChatMessagesFromTarget = groupChats.filter { $0.sender == target }
-       
-        // Group Chats where Target Participated
+        let dmMessages = individualMessages.filter { $0.to == targetContact }
+        let groupChatMessagesFromTarget = groupChats.filter { $0.sender == targetContact }
         let targetGroupChats = Set(groupChatMessagesFromTarget.compactMap { $0.groupChatName })
-       
-        // Your Messages in those Group Chats
         let groupChatMessagesFromMe = groupChats.filter { $0.sentByMe && targetGroupChats.contains($0.groupChatName ?? "") }
-       
         var dmCounts: [Date: Int] = [:]
+        var groupChatTargetCounts: [Date: Int] = [:]
+        var groupChatMeCounts: [Date: Int] = [:]
         for message in dmMessages {
             let intervalStart = intervalLabel(for: message.readableTime)
             dmCounts[intervalStart, default: 0] += 1
         }
-       
-        var groupChatTargetCounts: [Date: Int] = [:]
         for message in groupChatMessagesFromTarget {
             let intervalStart = intervalLabel(for: message.readableTime)
             groupChatTargetCounts[intervalStart, default: 0] += 1
         }
-       
-        var groupChatMeCounts: [Date: Int] = [:]
         for message in groupChatMessagesFromMe {
             let intervalStart = intervalLabel(for: message.readableTime)
             groupChatMeCounts[intervalStart, default: 0] += 1
         }
-       
+        var intervalStart = intervalLabel(for: minDate)
+        while intervalStart <= maxDate {
+            if dmCounts[intervalStart] == nil {
+                dmCounts[intervalStart] = 0
+            }
+            if groupChatTargetCounts[intervalStart] == nil {
+                groupChatTargetCounts[intervalStart] = 0
+            }
+            if groupChatMeCounts[intervalStart] == nil {
+                groupChatMeCounts[intervalStart] = 0
+            }
+            intervalStart = calendar.date(byAdding: .day, value: groupingsize, to: intervalStart) ?? intervalStart
+        }
         let allIntervalStarts = Set(dmCounts.keys)
             .union(groupChatTargetCounts.keys)
             .union(groupChatMeCounts.keys)
             .sorted()
-       
         var tempPersonActivityData: [PersonActivityDataPoint] = []
+        var tempPersonLineData: [PersonLineDataPoint] = []
+        
         for intervalStart in allIntervalStarts {
             let dmCount = dmCounts[intervalStart] ?? 0
             let groupChatTargetCount = groupChatTargetCounts[intervalStart] ?? 0
@@ -596,21 +679,34 @@ struct MessagesAnalysisView: View {
             let totalInteractions = dmCount + groupChatTargetCount + groupChatMeCount
             let dataPoint = PersonActivityDataPoint(intervalStart: intervalStart, dmMessages: dmCount, totalInteractions: totalInteractions)
             tempPersonActivityData.append(dataPoint)
+            
+            // Add line data points for each type
+            tempPersonLineData.append(PersonLineDataPoint(intervalStart: intervalStart, messageType: "DM Messages", count: dmCount))
+            tempPersonLineData.append(PersonLineDataPoint(intervalStart: intervalStart, messageType: "Total Interactions", count: totalInteractions))
         }
         self.specificPersonData = tempPersonActivityData.sorted(by: { $0.intervalStart < $1.intervalStart })
+        self.personLineData = tempPersonLineData
     }
+
+
+
+
+
     // MARK: - Helper Functions
-   
+    @State var skiplinecount = 0
+
     func parseCSV(csvString: String) -> [Message] {
         var messages: [Message] = []
         let lines = csvString.components(separatedBy: .newlines)
-       
+        
         guard let headerLine = lines.first else {
             print("CSV is empty")
             return messages
         }
-        let headers = headerLine.components(separatedBy: ",")
-       
+        
+        let headers = parseCSVRow(headerLine) // Use parseCSVRow to handle quoted fields
+        
+        // Ensure headers match expected columns
         guard let readableTimeIndex = headers.firstIndex(of: "Readable Time"),
               let sentByMeIndex = headers.firstIndex(of: "Sent by Me"),
               let groupChatIndex = headers.firstIndex(of: "Group Chat"),
@@ -620,32 +716,40 @@ struct MessagesAnalysisView: View {
             print("CSV headers are missing required columns.")
             return messages
         }
-       
+        
         let dateFormatter = DateFormatter()
         dateFormatter.dateFormat = "yyyy-MM-dd HH:mm:ss" // Adjust to your date format
-       
+        
         for line in lines.dropFirst() {
-            let columns = line.components(separatedBy: ",")
+            let columns = parseCSVRow(line) // Use parseCSVRow here to handle commas within quotes
+            
+            // Check if the row matches the expected header column count
             if columns.count != headers.count {
                 print("Skipping malformed line: \(line)")
+                skiplinecount += 1
+                print("Skipped \(skiplinecount) lines.")
                 continue
             }
-           
+            
+            // Extract values from each column based on header indices
             let readableTimeString = columns[readableTimeIndex]
             let sentByMeString = columns[sentByMeIndex]
             let groupChatString = columns[groupChatIndex]
             let groupChatNameString = columns[groupChatNameIndex].isEmpty ? nil : columns[groupChatNameIndex]
             let senderString = columns[senderIndex].isEmpty ? "Unknown" : columns[senderIndex]
             let toString = columns[toIndex].isEmpty ? "Unknown" : columns[toIndex]
-           
+            
+            // Convert date string to Date object
             guard let readableTime = dateFormatter.date(from: readableTimeString) else {
                 print("Skipping line with invalid date: \(line)")
                 continue
             }
-           
+            
+            // Parse boolean fields
             let sentByMe = (sentByMeString == "1")
             let groupChat = (groupChatString == "1")
-           
+            
+            // Create Message instance and add to array
             let message = Message(
                 readableTime: readableTime,
                 sentByMe: sentByMe,
@@ -656,9 +760,38 @@ struct MessagesAnalysisView: View {
             )
             messages.append(message)
         }
-       
+        
         return messages
     }
+    func parseCSVRow(_ row: String) -> [String] {
+        var result = [String]()
+        var currentField = ""
+        var insideQuotes = false
+        
+        for char in row {
+            if char == "\"" {
+                insideQuotes.toggle() // Toggle insideQuotes on each quote
+            } else if char == "," && !insideQuotes {
+                // End of field if not inside quotes
+                result.append(currentField)
+                currentField = ""
+            } else {
+                // Append character to current field
+                currentField.append(char)
+            }
+        }
+        
+        // Append the last field
+        result.append(currentField)
+        
+        // Trim spaces and remove extra quotes around fields
+        return result.map { $0.trimmingCharacters(in: CharacterSet(charactersIn: "\"")) }
+    }
+
+
+
+
+
 }
 
 // MARK: - Extensions

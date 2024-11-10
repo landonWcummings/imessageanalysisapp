@@ -1,372 +1,265 @@
 import SwiftUI
-import AppKit
-import SQLite3
-import Contacts
 import Foundation
+import Cocoa
 
+
+final class LoadingManager: ObservableObject {
+    static let shared = LoadingManager() // Singleton instance
+    @Published var isLoading: Bool = false
+    @Published var displayMessage: String = "Starting"
+    @Published var targetGC: String = ""
+    @Published var targetContact: String = ""
+    private init() {} // Private initializer to enforce singleton
+}
 
 struct ContentView: View {
-    @State private var selectedFileURL: URL?
+    @ObservedObject private var loadingManager = LoadingManager.shared // Observe the loading manager
     @State private var showAnalysisView = false
+    @State private var isAnimating = false // Controls the animation state of the spinner
+    @State private var targContact: String = "" // First text input state
+    @State private var targGC: String = "" // Second text input stat
+    @State private var firstClick: Bool = true
+    
+
     var body: some View {
-        VStack {
-            Button(action: {
-                print("Button tapped")
-                findchatdb()
-                createFolder()
-                if let dbURL = selectedFileURL {
-                    exportChatData(to: dbURL) // Call function to export chat data
-                }
-                exportContactsToCSV()
-                updateMessageSendersWithContactNames()
-                showAnalysisView = true
-            }) {
-                Text("Access Imessages")
-                    .padding()
-                    .background(Color.blue)
-                    .foregroundColor(.white)
-                    .cornerRadius(10)
-            }
-            if let fileURL = selectedFileURL {
-                Text("Selected file: \(fileURL.lastPathComponent)")
-            }
-            if showAnalysisView {
-                MessagesAnalysisView()
-                    .transition(.slide)
-            }
-
-        }
-        .padding()
-        .frame(minWidth: 1100, minHeight: 900)
-    }
-    func createFolder() {
-        // Get the URL to the Documents directory
-        let fileManager = FileManager.default
-        if let documentsDirectory = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first {
-            // Create a new folder path
-            let newFolderURL = documentsDirectory.appendingPathComponent("MyAppData")
-            
-            do {
-                // Create the folder if it doesn't exist
-                try fileManager.createDirectory(at: newFolderURL, withIntermediateDirectories: true, attributes: nil)
-                print("Folder created at: \(newFolderURL.path)")
-            } catch {
-                print("Failed to create folder: \(error.localizedDescription)")
-            }
-        }
-    }
-
-    func findchatdb() {
-        let homeDirectory = FileManager.default.homeDirectoryForCurrentUser
-        let chatdbPath = homeDirectory.appendingPathComponent("Library/Messages/chat.db")
-        selectedFileURL = chatdbPath
-        if FileManager.default.fileExists(atPath: chatdbPath.path) {
-            print("Found chat.db at \(chatdbPath.path)")
-        } else {
-            print("chat.db not found at \(chatdbPath.path)")
-        }
-
-        
-    }
-    func updateMessageSendersWithContactNames() -> Result<String, Error> {
-        do {
-            // Get document directory paths
-            let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-            let myAppDataPath = documentsPath.appendingPathComponent("MyAppData")
-            
-            // Set up file paths
-            let contactsPath = myAppDataPath.appendingPathComponent("contacts.csv")
-            let messagesPath = myAppDataPath.appendingPathComponent("all_chat_data.csv")
-            let outputPath = myAppDataPath.appendingPathComponent("processed_messages.csv")
-            
-            // Load and parse contacts
-            let contactsData = try String(contentsOf: contactsPath, encoding: .utf8)
-            var contacts: [String: String] = [:]
-            let contactRows = contactsData.components(separatedBy: .newlines)
-
-            // Parse contacts starting after header
-            for row in contactRows.dropFirst() where !row.isEmpty {
-                let columns = row.components(separatedBy: ",")
-                guard columns.count >= 2 else { continue }
-                
-                // Get phone numbers and full name (assuming phone numbers are in 4th column, full name in 1st)
-                let fullName = columns[0].trimmingCharacters(in: CharacterSet(charactersIn: "\""))
-                let phoneNumbers = columns[3].trimmingCharacters(in: CharacterSet(charactersIn: "\""))
-                
-                // Split phone numbers if multiple exist (separated by semicolon)
-                for phone in phoneNumbers.components(separatedBy: "; ") {
-                    // Clean and standardize phone number
-                    var standardizedPhone = phone.replacingOccurrences(of: "\\D", with: "", options: .regularExpression)
-                    if standardizedPhone.count == 10 {
-                        standardizedPhone = "1" + standardizedPhone
-                    }
-                    contacts[standardizedPhone] = fullName
-                }
-            }
-            
-            // Read messages file
-            let messagesData = try String(contentsOf: messagesPath, encoding: .utf8)
-            let messageRows = messagesData.components(separatedBy: .newlines)
-
-            // Get the header row and process it
-            var headerColumns = messageRows[0].components(separatedBy: ",")
-            var validHeaderIndices = [Int]() // Store indices of valid headers
-            var output = ""
-
-            for (index, header) in headerColumns.enumerated() {
-                let trimmedHeader = header.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !trimmedHeader.isEmpty { // Check for empty header
-                    validHeaderIndices.append(index)
-                    output += "\(header),"
-                }
-            }
-            output = String(output.dropLast()) + "\n" // Remove last comma and add newline
-
-            // Process each message row
-            for row in messageRows.dropFirst() where !row.isEmpty {
-                var columns = row.components(separatedBy: ",")
-                
-                // Create a new array to hold valid columns
-                var validColumns = [String]()
-                
-                // Filter columns based on valid header indices
-                for index in validHeaderIndices {
-                    if index < columns.count {
-                        validColumns.append(columns[index].trimmingCharacters(in: CharacterSet(charactersIn: "\"")))
-                    }
-                }
-                
-                guard validColumns.count >= 9 else { continue } // Ensure there are enough columns
-
-                // Get sender column (third column) and clean it
-                var senderNumber = validColumns[2]
-                senderNumber = senderNumber.replacingOccurrences(of: "\\D", with: "", options: .regularExpression)
-                if senderNumber.count == 10 {
-                    senderNumber = "1" + senderNumber
-                }
-
-                var contactidNumber = validColumns[8]
-                contactidNumber = contactidNumber.replacingOccurrences(of: "\\D", with: "", options: .regularExpression)
-                if contactidNumber.count == 10 {
-                    contactidNumber = "1" + senderNumber
-                }
-
-                // Replace sender with contact name if exists
-                if let contactName = contacts[senderNumber] {
-                    validColumns[2] = "\"\(contactName)\""
-                }
-
-                // Replace sender with contact name if exists
-                if let contactName = contacts[contactidNumber] {
-                    validColumns[8] = "\"\(contactName)\""
-                }
-
-                if validColumns[5].trimmingCharacters(in: .whitespacesAndNewlines) == "1" {
-                    validColumns[8] = "\"\"" // Set to empty string if Group Chat is 0
-                }
-
-                // Add processed valid row to output
-                output += validColumns.joined(separator: ",") + "\n"
-            }
-
-            
-            // Write processed data to new file
-            try output.write(to: outputPath, atomically: true, encoding: .utf8)
-            print("Labeled all messages")
-            return .success(outputPath.path)
-        } catch {
-            return .failure(error)
-        }
-    }
-
-
-
-
-
-
-
-    func exportContactsToCSV() -> Result<String, Error> {
-        do {
-            // Set up paths
-            let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-            let myAppDataPath = documentsPath.appendingPathComponent("MyAppData")
-            try FileManager.default.createDirectory(at: myAppDataPath, withIntermediateDirectories: true)
-            let csvPath = myAppDataPath.appendingPathComponent("contacts.csv")
-            
-            // Get AddressBook database path
-            guard let homeDir = FileManager.default.homeDirectoryForCurrentUser.path as String? else {
-                throw NSError(domain: "ContactsExport", code: 1, userInfo: [NSLocalizedDescriptionKey: "Could not get home directory"])
-            }
-            
-            let dbPath = "\(homeDir)/Library/Application Support/AddressBook/Sources/E5E82F88-A657-4108-A5BE-1FEEC0F6DFBA/AddressBook-v22.abcddb"
-            
-            // Open database
-            var db: OpaquePointer?
-            if sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) != SQLITE_OK {
-                throw NSError(domain: "ContactsExport", code: 2, userInfo: [NSLocalizedDescriptionKey: "Could not open database"])
-            }
-            defer { sqlite3_close(db) }
-            
-            // Prepare CSV string
-            var csvString = "Full Name,First Name,Last Name,Phone Number\n"
-            
-            // SQL query
-            let query = """
-                SELECT 
-                    TRIM(COALESCE(ZABCDRECORD.ZFIRSTNAME, '') || ' ' || COALESCE(ZABCDRECORD.ZLASTNAME, '')) as full_name,
-                    COALESCE(ZABCDRECORD.ZFIRSTNAME, '') as first_name,
-                    COALESCE(ZABCDRECORD.ZLASTNAME, '') as last_name,
-                    (SELECT GROUP_CONCAT(ZFULLNUMBER, '; ')
-                     FROM ZABCDPHONENUMBER
-                     WHERE ZABCDPHONENUMBER.ZOWNER = ZABCDRECORD.Z_PK) as phones
-                FROM ZABCDRECORD
-                WHERE ZFIRSTNAME IS NOT NULL 
-                   OR ZLASTNAME IS NOT NULL
-                ORDER BY full_name
-            """
-            
-            var stmt: OpaquePointer?
-            if sqlite3_prepare_v2(db, query, -1, &stmt, nil) == SQLITE_OK {
-                defer { sqlite3_finalize(stmt) }
-                
-                while sqlite3_step(stmt) == SQLITE_ROW {
-                    // Helper function to safely convert SQLite text to String
-                    func getColumnText(_ columnIndex: Int32) -> String {
-                        guard let cString = sqlite3_column_text(stmt, columnIndex) else {
-                            return ""
-                        }
-                        return String(cString: cString)
-                    }
+        ZStack {
+            VStack {
+                Spacer()
+                // Access Imessages Button above the input fields
+                Button(action: {
                     
-                    let fullName = getColumnText(0)
-                    let firstName = getColumnText(1)
-                    let lastName = getColumnText(2)
-                    let phones = getColumnText(3)
-                    
-                    // Split phone numbers by semicolon
-                    let phoneNumbers = phones.split(separator: ";").map { phone in
-                        // Remove all non-numeric characters
-                        var cleanedPhone = phone.replacingOccurrences(of: "\\D", with: "", options: .regularExpression)
-                        
-                        // If the cleaned phone number has 10 digits, prepend "1"
-                        if cleanedPhone.count == 10 {
-                            cleanedPhone = "1" + cleanedPhone
+                    if !checkFullDiskAccess() {
+                        // Prompt the user to grant Full Disk Access
+                        showFullDiskAccessAlert()
+                    }else{
+                        if firstClick {
+                            print("Button tapped")
+                            firstClick = false
+                            
+
+                            LoadingManager.shared.isLoading = true // Start loading
+                            isAnimating = true // Start animation
+
+                            // Run long-running tasks in the background
+                            DispatchQueue.global().async {
+                                DispatchQueue.main.async {
+                                    LoadingManager.shared.targetGC = targGC
+                                    LoadingManager.shared.targetContact = targContact
+                                    
+                                }
+
+                                
+                                let datastartup = DataPrep() // Perform DataPrep operation
+                                MessagesAnalysisView() // Perform MessageAnalysis operation
+
+                                // Once the operations are done, update on the main thread
+                                DispatchQueue.main.async {
+                                    LoadingManager.shared.isLoading = false // Stop loading
+                                    isAnimating = false // Stop animation
+                                    showAnalysisView = true // Show analysis view
+                                }
+                            }
+                            
+                        }else{
+                            print("second time")
+                            showAnalysisView = false
+                            firstClick = true
+                            
+                            
                         }
                         
-                        return cleanedPhone
                     }
                     
-                    // Add each phone number as a separate row
-                    for phone in phoneNumbers {
-                        let row = "\"\(fullName)\",\"\(firstName)\",\"\(lastName)\",\"\(phone)\"\n"
-                        csvString += row
+                }) {
+                    Text("Access Imessages")
+                        .padding()
+                        .background(Color.blue)
+                        .foregroundColor(.white)
+                        .cornerRadius(10)
+                }
+                .frame(maxWidth: .infinity, alignment: .center)
+                Spacer(minLength: 30) // Add some space between the button and input fields
+                
+                // HStack for input fields
+                HStack {
+                    // Left input box with label above it
+                    VStack {
+                        Text("Specific Contact Analysis") // Label for first input field
+                            .font(.headline)
+                            .padding(.bottom, 5)
+                        TextField("Case sensitive", text: $targContact)
+                            .textFieldStyle(RoundedBorderTextFieldStyle())
+                            .padding()
+                    }
+                    
+                    Spacer() // To create space between the two input fields
+                    
+                    // Right input box with label above it
+                    VStack {
+                        Text("Specific Group Chat Analysis") // Label for second input field
+                            .font(.headline)
+                            .padding(.bottom, 5)
+                        TextField("Case sensitive", text: $targGC)
+                            .textFieldStyle(RoundedBorderTextFieldStyle())
+                            .padding()
                     }
                 }
+                .padding(.horizontal) // Add padding around HStack
+                .padding(.bottom, 20) // Add padding at the bottom if needed
+                
+                
+                if showAnalysisView {
+                    
+                    MessagesAnalysisView()
+                        .transition(.slide)
+                }
             }
+            .padding(.top)
+            .frame(minWidth: 1100, minHeight: 700)
             
-            // Write to file
-            try csvString.write(to: csvPath, atomically: true, encoding: .utf8)
-            print("All contacts saved")
-            return .success(csvPath.path)
-        } catch {
-            return .failure(error)
+            // Display loading overlay when isLoading is true
+            if loadingManager.isLoading {
+                Color.black.opacity(0.3) // Semi-transparent background
+                    .ignoresSafeArea()
+                
+                VStack {
+                    CustomSpinner(isAnimating: $isAnimating) // Custom spinner view
+                        .frame(width: 350, height: 150) // Adjust size as desired
+                    Text(loadingManager.displayMessage)
+                        .foregroundColor(.gray)
+                        .font(.headline)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding()
+                .background(Color.white)
+                .cornerRadius(10)
+                .frame(width: 150, height: 150)
+            }
         }
+        .animation(.easeInOut, value: loadingManager.isLoading)
+
     }
 
+}
 
-    func exportChatData(to dbURL: URL) {
-        let fileManager = FileManager.default
-        let outputDir = fileManager.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("MyAppData")
-        
-        // Create output directory if it doesn't exist
+
+
+func showFullDiskAccessAlert() {
+    let alert = NSAlert()
+    alert.messageText = "Full Disk Access Required"
+    let linkText = "(Link to Code)"
+    let linkURL = URL(string: "https://github.com/landonWcummings/imessageanalysisapp")!
+
+    // Find the range of the link text and add the link attribute
+    
+    // Informative text explaining the need for disk access
+    let informativeText = """
+    This app requires Full Disk Access to function. You are 3 clicks away:
+
+    1. Open System Preferences.
+    2. Go to Security & Privacy > Privacy > Full Disk Access.
+    3. Click the slider enabling disk access for this app (or add it if it does not appear on the list).
+
+    
+    
+    Understand why this app needs disk access:
+    - iMessage Analysis will only ever access two files: the iMessages database and the contacts database.
+    
+    
+    
+    NOTE:
+    - iMessage Analysis is completely open source \(linkText).
+    - iMessage Analysis will never connect to the internet. Everything runs locally on your machine.
+    
+    After granting access, please restart the app.
+    """
+    
+    // Creating an attributed string for the alert with a hyperlink
+    let fullText = NSMutableAttributedString(string: informativeText)
+    if let linkRange = fullText.string.range(of: linkText) {
+        let nsRange = NSRange(linkRange, in: fullText.string)
+        fullText.addAttribute(.link, value: linkURL, range: nsRange)
+    }
+
+    // Setting up the accessory view as a non-editable NSTextView
+    let textView = NSTextView(frame: NSRect(x: 0, y: 0, width: 400, height: 350))
+    textView.textStorage?.setAttributedString(fullText)
+    textView.isEditable = false
+    textView.isSelectable = true
+    textView.drawsBackground = false
+    textView.isHorizontallyResizable = false
+    textView.isVerticallyResizable = false
+    textView.textContainer?.lineFragmentPadding = 0
+    textView.textContainer?.widthTracksTextView = true
+
+    // Add the accessory view to the alert
+    alert.accessoryView = textView
+    alert.alertStyle = .warning
+    alert.addButton(withTitle: "Open System Preferences")
+    alert.addButton(withTitle: "Cancel")
+
+    // Handle the alert button actions
+    if alert.runModal() == .alertFirstButtonReturn {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles") {
+            NSWorkspace.shared.open(url)
+        }
+    }
+}
+
+
+
+
+
+func checkFullDiskAccess() -> Bool {
+    let fileManager = FileManager.default
+    let homeDirectory = FileManager.default.homeDirectoryForCurrentUser
+    let chatDBPath = homeDirectory.appendingPathComponent("Library/Messages/chat.db")
+    
+    if fileManager.isReadableFile(atPath: chatDBPath.path) {
+        // Attempt to read a small portion of the file
         do {
-            try fileManager.createDirectory(at: outputDir, withIntermediateDirectories: true, attributes: nil)
+            let fileHandle = try FileHandle(forReadingFrom: chatDBPath)
+            fileHandle.closeFile()
+            print("Full Disk Access is granted.")
+            return true
         } catch {
-            print("Failed to create directory: \(error.localizedDescription)")
-            return
+            print("Failed to read chat.db: \(error.localizedDescription)")
+            return false
         }
-
-        let csvOutputPath = outputDir.appendingPathComponent("all_chat_data.csv")
-
-        var db: OpaquePointer?
-        if sqlite3_open(dbURL.path, &db) != SQLITE_OK {
-            print("Error opening database")
-            return
-        }
-
-        let query = """
-        SELECT 
-            message.date/1000000000 + strftime('%s', '2001-01-01') AS timestamp,
-            datetime(message.date/1000000000 + strftime('%s', '2001-01-01'), 'unixepoch', 'localtime') AS readable_time,
-            CASE 
-                WHEN message.is_from_me = 1 THEN 'Me'
-                ELSE handle.id
-            END AS sender,
-            handle.ROWID AS sender_id,
-            message.text AS message_text,
-            CASE 
-                WHEN chat.style = 43 THEN 1 
-                ELSE 0 
-            END AS is_group_chat,
-            chat.display_name AS group_chat_name,
-            message.is_from_me,
-            handle.id AS contact_identifier
-        FROM message 
-        LEFT JOIN handle ON message.handle_id = handle.ROWID 
-        LEFT JOIN chat_message_join ON message.ROWID = chat_message_join.message_id
-        LEFT JOIN chat ON chat_message_join.chat_id = chat.ROWID
-        WHERE message.text IS NOT NULL
-        ORDER BY message.date DESC
-        """
-
-        var statement: OpaquePointer?
-        if sqlite3_prepare_v2(db, query, -1, &statement, nil) == SQLITE_OK {
-            var csvString = "Timestamp,Readable Time,Sender,Sender ID,Message,Group Chat,Group Chat Name,Sent by Me,To\n"
-
-            while sqlite3_step(statement) == SQLITE_ROW {
-                let timestamp = sqlite3_column_double(statement, 0)
-
-                // Safely unwrap each column that could be NULL
-                let readableTime = sqlite3_column_text(statement, 1).flatMap { String(cString: $0) } ?? "N/A"
-                let sender = sqlite3_column_text(statement, 2).flatMap { String(cString: $0) } ?? "Unknown"
-                let senderId = sqlite3_column_int64(statement, 3)
-                
-                // Escape quotes in message text
-                let messageText = sqlite3_column_text(statement, 4).flatMap { String(cString: $0) } ?? ""
-                let escapedMessageText = messageText.replacingOccurrences(of: "\"", with: "\"\"")
-                
-                let isGroupChat = sqlite3_column_int(statement, 5)
-                let groupChatName = sqlite3_column_text(statement, 6).flatMap { String(cString: $0) } ?? "N/A"
-                let isFromMe = sqlite3_column_int(statement, 7)
-                let contactIdentifier = sqlite3_column_text(statement, 8).flatMap { String(cString: $0) } ?? ""
-
-                // Enclose the messageText in quotes
-                csvString += "\(timestamp),\"\(readableTime)\",\"\(sender)\",\(senderId),\"\(escapedMessageText)\",\(isGroupChat),\"\(groupChatName)\",\(isFromMe),\"\(contactIdentifier)\"\n"
-            }
-
-            // Write CSV string to file
-            do {
-                try csvString.write(to: csvOutputPath, atomically: true, encoding: .utf8)
-                print("All relevant chat data has been exported to \(csvOutputPath.path)")
-            } catch {
-                print("Failed to write CSV file: \(error.localizedDescription)")
-            }
-        } else {
-            print("Error preparing statement: \(String(cString: sqlite3_errmsg(db)))")
-        }
-
-        sqlite3_finalize(statement)
-        sqlite3_close(db)
+    } else {
+        print("chat.db is not readable.")
+        return false
     }
+}
 
+
+// Custom Spinner View
+struct CustomSpinner: View {
+    @Binding var isAnimating: Bool
+    @State private var rotation: Double = 0
+
+    var body: some View {
+        Circle()
+            .trim(from: 0.2, to: 1.0) // Partial circle for spinner appearance
+            .stroke(Color.blue, lineWidth: 5) // Customize color and width
+            .frame(width: 50, height: 50)
+            .rotationEffect(.degrees(rotation)) // Rotate the circle
+            .onAppear {
+                withAnimation(Animation.linear(duration: 1).repeatForever(autoreverses: false)) {
+                    rotation = 360 // Rotate full circle every second
+                }
+            }
+            .opacity(isAnimating ? 1.0 : 0.0) // Hide when not animating
+    }
 }
 
 @main
 struct Imessage_AnalysisApp: App {
     var body: some Scene {
         WindowGroup {
-            ContentView() // This will load the MessagesAnalysisView
+            ContentView()
         }
         .windowStyle(DefaultWindowStyle())
     }
 }
+
