@@ -92,11 +92,27 @@ struct MessagesAnalysisView: View {
     @State private var specificPersonData: [PersonActivityDataPoint] = []
     @State var targetGC = ""
     @State var targetContact = ""
+    @State private var totalMessagesCount: Int = 0 // Existing State variable for total messages
+    @State private var earliestMessageDate: Date? = nil // New State variable for earliest message date
+
    
     var body: some View {
         
         ScrollView {
             VStack(spacing: 30) {
+                Text("Total Messages: \(totalMessagesCount)")
+                    .font(.title2)
+                    .padding(.top)
+                
+                // Display earliest message date if available
+                if let earliestDate = earliestMessageDate {
+                    Text("Earliest Message Date: \(dateDisplayFormatter.string(from: earliestDate))")
+                        .font(.title2)
+                }
+                Text("⬇️")
+                    .font(.title2)
+                    .padding(.top)
+
                 lifetimeActivityChart
                 sentMessagesAverageChart
                 timeOfDayActivityCharts
@@ -114,6 +130,12 @@ struct MessagesAnalysisView: View {
             loadData()
         }
     }
+    let dateDisplayFormatter: DateFormatter = {
+       let formatter = DateFormatter()
+       formatter.dateFormat = "dd/MM/yyyy"
+       return formatter
+   }()
+
    
     // MARK: - Charts and Views
    
@@ -351,6 +373,7 @@ struct MessagesAnalysisView: View {
 
    
     var specificPersonActivityChart: some View {
+        
         VStack(alignment: .leading) {
             HStack {
                 Text("Message Activity with ")
@@ -397,24 +420,27 @@ struct MessagesAnalysisView: View {
         }
         let fileURL = documentsDirectory.appendingPathComponent("ImessageAnalysisData/processed_messages.csv")
         print("location: \(fileURL)")
-       
+
         do {
             let csvString = try String(contentsOf: fileURL, encoding: .utf8)
-           
+
             self.messages = parseCSV(csvString: csvString)
             print("data loaded successfully")
-           
-            // Print available group chat names and contacts
-            let groupChatNames = Set(messages.compactMap { $0.groupChatName })
-                       
-            let contactNames = Set(messages.map { $0.sender }).union(messages.map { $0.to })
-                       
+
+            // Update the total messages count
+            self.totalMessagesCount = messages.count
+
+            // Update the earliest message date
+            self.earliestMessageDate = messages.min(by: { $0.readableTime < $1.readableTime })?.readableTime
+
+            // Proceed to process data
             processData()
         } catch {
             print("Error reading CSV file: \(error)")
             return
         }
     }
+
    
     func processData() {
         DispatchQueue.global().async {
@@ -438,6 +464,9 @@ struct MessagesAnalysisView: View {
             DispatchQueue.main.async {
                 
                 LoadingManager.shared.isLoading = false
+            }
+            if targetContact.isEmpty {
+                targetContact = "NA"
             }
         }
     }

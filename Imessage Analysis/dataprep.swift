@@ -270,8 +270,24 @@ struct DataPrep {
                 throw NSError(domain: "ContactsExport", code: 1, userInfo: [NSLocalizedDescriptionKey: "Could not get home directory"])
             }
             
-            let dbPath = "\(homeDir)/Library/Application Support/AddressBook/Sources/E5E82F88-A657-4108-A5BE-1FEEC0F6DFBA/AddressBook-v22.abcddb"
-            
+            let sourcesPath = "\(homeDir)/Library/Application Support/AddressBook/Sources"
+            var dbPath = ""
+
+            do {
+                                // Use FileManager to list the contents of the Sources directory
+                let fileManager = FileManager.default
+                let sourcesContents = try fileManager.contentsOfDirectory(atPath: sourcesPath)
+                
+                // Check if there are any items in the Sources directory
+                if let firstSource = sourcesContents.first {
+                    dbPath = "\(sourcesPath)/\(firstSource)/AddressBook-v22.abcddb"
+                    print("Database path: \(dbPath)")
+                } else {
+                    print("No items found in the Sources directory.")
+                }
+            } catch {
+                print("Error accessing Sources directory: \(error)")
+            }
             // Open database
             var db: OpaquePointer?
             if sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) != SQLITE_OK {
